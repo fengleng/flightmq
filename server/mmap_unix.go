@@ -9,7 +9,7 @@ import (
 	"syscall"
 )
 
-func mMap(fd uintptr, size int64) ([]byte, error) {
+func mMap(fd uintptr, size int) ([]byte, error) {
 	data, err := syscall.Mmap(int(fd), 0, defaultMemMapSize, syscall.PROT_WRITE|syscall.PROT_READ, syscall.MAP_SHARED)
 	if err != nil {
 		log.Error("err:%v", err)

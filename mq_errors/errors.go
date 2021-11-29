@@ -11,4 +11,5 @@ var (
 	ErrMsgMaxPushNumExceed = errors.New("MsgMaxPushNum must be between 1 and 1000.")
 	ErrMqIsRunning         = errors.New("mq is running")
 	ErrMqLoadingRunning    = errors.New("mq loading running fail")
+	ErrQueueClosed         = errors.New("queue has been closed.")
 )

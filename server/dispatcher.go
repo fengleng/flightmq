@@ -6,6 +6,7 @@ import (
 	"github.com/fengleng/flightmq/common"
 	"github.com/fengleng/flightmq/config"
 	"github.com/fengleng/flightmq/log"
+	"github.com/pingcap/errors"
 	"sync"
 )
 
@@ -21,6 +22,8 @@ type Dispatcher struct {
 	// topic
 	topics   map[string]*Topic
 	topicMux sync.RWMutex
+
+	channels map[string]*Channel
 
 	// channel
 	//channels          map[string]*Channel
@@ -173,50 +176,129 @@ func (d *Dispatcher) GetTopics() []*Topic {
 	return topics
 }
 
-// worker负责处理延迟消息
-//func (d *Dispatcher) scanWorker(workCh chan *Topic, closeCh chan int, responseCh chan bool) {
-//	for {
-//		select {
-//		case <-closeCh:
-//			d.poolSize--
-//			return
-//		case topic := <-workCh:
-//			err := topic.retrievalBucketExpireMsg()
-//			err2 := topic.retrievalQueueExipreMsg()
-//			if err != nil && err2 != nil {
-//				responseCh <- false
-//			} else {
-//				responseCh <- true
-//			}
-//		}
-//	}
-//}
+// get topic
+// create topic if it is not exist
+func (d *Dispatcher) GetTopic(name string) *Topic {
+	d.topicMux.RLock()
+	if t, ok := d.topics[name]; ok {
+		d.topicMux.RUnlock()
+		return t
+	} else {
+		d.topicMux.RUnlock()
+	}
 
-//// 调整池大小
-//func (d *Dispatcher) resizePool(topicNum int, workCh chan *Topic, closeCh chan int, responseCh chan bool) {
-//	// 每次处理四分之一数量的topic
-//	workerNum := int(float64(topicNum) * 0.25)
-//	if workerNum < 1 {
-//		workerNum = 1
-//	}
-//
-//	// topic数量增加,导致需要创建更多的woker数量,启动新的worker并增加池大小
-//	if workerNum > d.poolSize {
-//		d.logger.Info(fmt.Sprintf("start %v of workers to scan delay message", workerNum))
-//		d.wg.Wrap(func() {
-//			d.scanWorker(workCh, closeCh, responseCh)
-//		})
-//		d.poolSize++
-//		return
-//	}
-//
-//	// 当需要的woker数量小于池大小时,发送关闭信号到closeCh管道
-//	// worker从closeCh管道收到消息后,关闭退出
-//	// todo 目前topic是不会自己消失的,所以需要一个机制,当topic没有客户端连接时,关闭topic
-//	if workerNum < d.poolSize {
-//		d.LogInfo("reduce scan-Worker for pool", workerNum, d.poolSize)
-//		for i := d.poolSize - workerNum; i > 0; i-- {
-//			closeCh <- 1
-//		}
-//	}
-//}
+	d.topicMux.Lock()
+	t := NewTopic(name, d.srv.cfg)
+	d.topics[name] = t
+	d.topicMux.Unlock()
+	return t
+}
+
+// get topic
+// returns error when it is not exist
+func (d *Dispatcher) GetExistTopic(name string) (*Topic, error) {
+	d.topicMux.RLock()
+	defer d.topicMux.RUnlock()
+
+	if t, ok := d.topics[name]; ok {
+		return t, nil
+	} else {
+		return nil, errors.New("topic is not exist")
+	}
+}
+
+// RemoveTopic remove topic by topic.name
+func (d *Dispatcher) RemoveTopic(name string) {
+	d.topicMux.Lock()
+	if t, ok := d.topics[name]; ok {
+		delete(d.topics, t.name)
+	}
+
+	d.topicMux.Unlock()
+}
+
+// get channel
+// create channel if is not exist
+func (d *Dispatcher) GetChannel(key string) *Channel {
+	d.channelMux.RLock()
+	if c, ok := d.channels[key]; ok {
+		d.channelMux.RUnlock()
+		return c
+	} else {
+		d.channelMux.RUnlock()
+	}
+
+	d.channelMux.Lock()
+	//c := NewChannel(key, d.ctx)
+	c := NewChannel(key)
+	d.channels[key] = c
+	d.channelMux.Unlock()
+	return c
+}
+
+// RemoveChannel remove channel by channel.key
+func (d *Dispatcher) RemoveChannel(key string) {
+	d.channelMux.Lock()
+	if c, ok := d.channels[key]; ok {
+		delete(d.channels, c.key)
+	}
+
+	d.channelMux.Unlock()
+}
+
+// 消息推送
+// 每一条消息都需要dispatcher统一分配msg.Id
+func (d *Dispatcher) push(name string, routeKey string, data []byte, delay int) (uint64, error) {
+	msgId := d.snowflake.Generate()
+	msg := &Msg{}
+	msg.Id = msgId
+	msg.Delay = uint32(delay)
+	msg.Body = data
+
+	topic := d.GetTopic(name)
+	err := topic.push(msg, routeKey)
+	msg = nil
+
+	return msgId, err
+}
+
+// consume message
+func (d *Dispatcher) pop(name, bindKey string) (*Msg, error) {
+	topic := d.GetTopic(name)
+	return topic.pop(bindKey)
+}
+
+// consume dead message
+func (d *Dispatcher) dead(name, bindKey string) (*Msg, error) {
+	topic := d.GetTopic(name)
+	return topic.dead(bindKey)
+}
+
+// ack message
+func (d *Dispatcher) ack(name string, msgId uint64, bindKey string) error {
+	topic := d.GetTopic(name)
+	return topic.ack(msgId, bindKey)
+}
+
+// Set config
+func (d *Dispatcher) Set(name string, configure *topicConfigure) error {
+	topic := d.GetTopic(name)
+	return topic.set(configure)
+}
+
+// declare queue
+func (d *Dispatcher) declareQueue(queueName, bindKey string) error {
+	topic := d.GetTopic(queueName)
+	return topic.delcareQueue(bindKey)
+}
+
+// subscribe channel
+func (d *Dispatcher) subscribe(channelName string, conn *TcpConn) error {
+	channel := d.GetChannel(channelName)
+	return channel.addConn(conn)
+}
+
+func (d *Dispatcher) publish(channelName string, msg []byte) error {
+	channel := d.GetChannel(channelName)
+	return channel.publish(msg)
+}

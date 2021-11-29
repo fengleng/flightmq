@@ -9,6 +9,7 @@ import (
 	"github.com/fengleng/flightmq/log"
 	"io"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -90,8 +91,8 @@ func (c *TcpConn) Handle() {
 		//	err = c.MPUB(params)
 		//case bytes.Equal(cmd, []byte("dead")):
 		//	err = c.DEAD(params)
-		//case bytes.Equal(cmd, []byte("set")):
-		//	err = c.SET(params)
+		case bytes.Equal(cmd, []byte("set")):
+			err = c.SET(params)
 		//case bytes.Equal(cmd, []byte("queue")):
 		//	err = c.DECLAREQUEUE(params)
 		//case bytes.Equal(cmd, []byte("subscribe")):
@@ -121,6 +122,25 @@ func (c *TcpConn) Handle() {
 	// force close conn
 	_ = c.conn.Close()
 	close(c.exitChan) // notify channel to remove connection
+}
+
+func (c *TcpConn) SET(params [][]byte) error {
+	if len(params) != 5 {
+		return NewFatalClientErr(ErrParams, "params equal 5")
+	}
+	topic := string(params[0])
+	if len(topic) == 0 {
+		return NewFatalClientErr(ErrTopicEmpty, "topic is empty")
+	}
+
+	configure := &topicConfigure{}
+	configure.isAutoAck, _ = strconv.Atoi(string(params[1]))
+	configure.mode, _ = strconv.Atoi(string(params[2]))
+	configure.msgTTR, _ = strconv.Atoi(string(params[3]))
+	configure.msgRetry, _ = strconv.Atoi(string(params[4]))
+
+	c.serv.dispatcher.Set(topic, configure)
+	return nil
 }
 
 func (c *TcpConn) exit() {

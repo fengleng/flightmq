@@ -42,5 +42,11 @@ func (s *Server) Run() error {
 
 	s.wg.Wrap(dispatcher.Run)
 
+	tcpServer := NewTcpServ(s.cfg)
+
+	tcpServer.dispatcher = dispatcher
+
+	s.wg.Wrap(tcpServer.Run)
+
 	return nil
 }
