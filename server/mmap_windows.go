@@ -1,3 +1,4 @@
+//go:build windows
 // +build windows
 
 package server
@@ -10,7 +11,7 @@ import (
 )
 
 // 参考blot内存映射
-func mmap(q *queue, size int) error {
+func mMap(q *queue, size int) error {
 	if err := q.file.Truncate(int64(size)); err != nil {
 		return fmt.Errorf("truncate: %s", err)
 	}
@@ -39,7 +40,7 @@ func mmap(q *queue, size int) error {
 	return nil
 }
 
-func unmap(q *queue) error {
+func munMap(q *queue) error {
 	if q.data == nil {
 		return nil
 	}

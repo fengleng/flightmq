@@ -1,5 +1,7 @@
 github.com/boltdb/bolt v1.3.1 h1:JQmyP4ZBrce+ZQu0dY660FMfatumYDLun9hBCUVIkF4=
 github.com/boltdb/bolt v1.3.1/go.mod h1:clJnj/oiGkjum5o1McbSZDSLxVThjynRyGBgiAx27Ps=
+github.com/fengleng/go-common v0.0.3 h1:NQTin4eROQEanyVebnQWCqSfQ4VHfP2h06xLQ/E2hIU=
+github.com/fengleng/go-common v0.0.3/go.mod h1:ffHCWqXZwHu+lM7i0R78AUoXVEnHlmMfkgQlYpNJ2OU=
 github.com/fengleng/go-common v0.0.6 h1:gRGDZ+U0QjG7g3KAMbhDVgNhdAGFGz72aEwQe/vY4K4=
 github.com/fengleng/go-common v0.0.6/go.mod h1:ar8cEtVh7VhQ01kEuUw4jWc3ljs0CqT2yOTJQz+vwrM=
 github.com/pingcap/errors v0.11.4 h1:lFuQV/oaUMGcD2tqt+01ROSmJs75VG1ToEOkZIZ4nE4=
