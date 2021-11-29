@@ -31,10 +31,10 @@ type logCfg struct {
 	skip    int
 }
 
-var (
-	StdLog Logger
-	Log    Logger
-)
+//var (
+//	StdLog Logger
+//	Log    Logger
+//)
 
 var (
 	dir           string
@@ -61,8 +61,9 @@ func init() {
 		seq:            seq,
 		skip:           defaultSkip,
 	}
-	StdLog = NewConsoleLogger(CfgOptionSkip(3))
-	Log = NewFileLogger(CfgOptionSkip(3))
+	logger = NewConsoleLogger()
+	//StdLog = NewConsoleLogger(CfgOptionSkip(3))
+	//Log = NewFileLogger(CfgOptionSkip(3))
 	//StdLog = NewConsoleLogger()
 	//Log = NewFileLogger()
 }

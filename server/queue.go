@@ -32,3 +32,10 @@ type readQueueData struct {
 	data []byte
 	pos  int64
 }
+
+func (q *queue) exit() {
+	q.closed = true
+	close(q.exitChan)
+	close(q.notifyReadMsgChan)
+	q.wg.Wait()
+}

@@ -12,10 +12,6 @@ var (
 	logger Logger
 )
 
-func init() {
-	logger = NewConsoleLogger()
-}
-
 func InitLogger(lg Logger) {
 	if lg == nil {
 		return
