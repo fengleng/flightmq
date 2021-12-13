@@ -176,7 +176,7 @@ func (d *Dispatcher) GetTopics() []*Topic {
 	return topics
 }
 
-// get topic
+// GetTopic get topic
 // create topic if it is not exist
 func (d *Dispatcher) GetTopic(name string) *Topic {
 	d.topicMux.RLock()
@@ -194,7 +194,7 @@ func (d *Dispatcher) GetTopic(name string) *Topic {
 	return t
 }
 
-// get topic
+// GetExistTopic get topic
 // returns error when it is not exist
 func (d *Dispatcher) GetExistTopic(name string) (*Topic, error) {
 	d.topicMux.RLock()
@@ -217,7 +217,7 @@ func (d *Dispatcher) RemoveTopic(name string) {
 	d.topicMux.Unlock()
 }
 
-// get channel
+// GetChannel get channel
 // create channel if is not exist
 func (d *Dispatcher) GetChannel(key string) *Channel {
 	d.channelMux.RLock()
@@ -289,7 +289,7 @@ func (d *Dispatcher) Set(name string, configure *topicConfigure) error {
 // declare queue
 func (d *Dispatcher) declareQueue(queueName, bindKey string) error {
 	topic := d.GetTopic(queueName)
-	return topic.delcareQueue(bindKey)
+	return topic.declareQueue(bindKey)
 }
 
 // subscribe channel

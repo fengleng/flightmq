@@ -35,7 +35,7 @@ type RecvMsgData struct {
 	RouteKey string `json:"route_key"`
 }
 
-// 消息结构
+// Msg 消息结构
 type Msg struct {
 	Id     uint64 `json:"id"`
 	Retry  uint16 `json:"retry"`
@@ -44,7 +44,7 @@ type Msg struct {
 	Body   []byte `json:"body"`
 }
 
-// 延迟消息结构
+// DelayMsg 延迟消息结构
 type DelayMsg struct {
 	Msg      *Msg     `json:"msg"`
 	BindKeys []string `json:"bind_key"`
@@ -59,7 +59,7 @@ func NewMsgIndex(fid, offset int) *MsgIndex {
 	return &MsgIndex{fid, offset}
 }
 
-// 消息编码
+// Encode 消息编码
 // expire(8-bytes) + id(8-bytes) + retry(2-bytes) + body(n-bytes)
 func Encode(m *Msg) []byte {
 	var data = make([]byte, 8+8+2+len(m.Body))
@@ -70,7 +70,7 @@ func Encode(m *Msg) []byte {
 	return data
 }
 
-// 消息解码
+// Decode 消息解码
 // expire(8-bytes) + id(8-bytes) + retry(2-bytes) + body(n-bytes)
 func Decode(data []byte) *Msg {
 	msg := &Msg{}

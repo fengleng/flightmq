@@ -3,6 +3,8 @@ package server
 import (
 	"fmt"
 	"github.com/fengleng/flightmq/common"
+	"github.com/fengleng/flightmq/log"
+	"github.com/pingcap/errors"
 	"sync"
 	"time"
 )
@@ -14,6 +16,8 @@ type Channel struct {
 	pushMsgChan chan []byte
 	wg          common.WaitGroupWrapper
 	sync.RWMutex
+
+	logger log.Logger
 }
 
 func NewChannel(key string) *Channel {
@@ -23,6 +27,7 @@ func NewChannel(key string) *Channel {
 		exitChan:    make(chan struct{}),
 		conns:       make(map[*TcpConn]bool),
 		pushMsgChan: make(chan []byte),
+		logger: log.NewFileLogger(),
 	}
 	ch.wg.Wrap(ch.distribute)
 	return ch
@@ -41,7 +46,7 @@ func (c *Channel) addConn(tcpConn *TcpConn) error {
 	defer c.Unlock()
 
 	if _, ok := c.conns[tcpConn]; ok {
-		return fmt.Errorf("client %s had connection.", tcpConn.conn.LocalAddr().String())
+		return errors.Errorf("client %s had connection.", tcpConn.conn.LocalAddr().String())
 	}
 
 	start := make(chan struct{})
@@ -76,12 +81,12 @@ func (c *Channel) publish(msg []byte) error {
 	defer c.RUnlock()
 
 	if len(c.conns) == 0 {
-		return fmt.Errorf("no subscribers")
+		return errors.Errorf("no subscribers")
 	}
 
 	select {
 	case <-time.After(10 * time.Second):
-		return fmt.Errorf("timeout.")
+		return errors.Errorf("timeout.")
 	case c.pushMsgChan <- msg:
 		return nil
 	}
@@ -91,43 +96,14 @@ func (c *Channel) distribute() {
 	for {
 		select {
 		case <-c.exitChan:
-			//c.LogInfo(fmt.Sprintf("channel %s has exit distribute.", c.key))
+			c.logger.Error(fmt.Sprintf("channel %s has exit distribute.", c.key))
 			return
 		case msg := <-c.pushMsgChan:
 			c.RLock()
 			for tcpConn, _ := range c.conns {
-				tcpConn.Send(RESP_CHANNEL, msg)
+				_ = tcpConn.Send(RESP_CHANNEL, msg)
 			}
 			c.RUnlock()
 		}
 	}
 }
-
-//
-//func (c *Channel) LogError(msg ...interface{}) {
-//	var v []interface{}
-//	v = append(v, logs.LogCategory("Channel_"+c.key))
-//	v = append(v, msg...)
-//	c.ctx.Logger.Error(v...)
-//}
-//
-//func (c *Channel) LogWarn(msg ...interface{}) {
-//	var v []interface{}
-//	v = append(v, logs.LogCategory("Channel_"+c.key))
-//	v = append(v, msg...)
-//	c.ctx.Logger.Warn(v...)
-//}
-//
-//func (c *Channel) LogInfo(msg ...interface{}) {
-//	var v []interface{}
-//	v = append(v, logs.LogCategory("Channel_"+c.key))
-//	v = append(v, msg...)
-//	c.ctx.Logger.Info(v...)
-//}
-//
-//func (c *Channel) logDebug(msg ...interface{}) {
-//	var v []interface{}
-//	v = append(v, logs.LogCategory("Channel_"+c.key))
-//	v = append(v, msg...)
-//	c.ctx.Logger.Debug(v...)
-//}

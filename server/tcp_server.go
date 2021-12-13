@@ -50,7 +50,7 @@ func (s *TcpServ) Run() {
 		case <-s.exitChan:
 		}
 
-		listen.Close()
+		_ = listen.Close()
 	}()
 
 	for {

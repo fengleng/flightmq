@@ -236,7 +236,9 @@ func (t *Topic) init() {
 		}
 		return
 	}
-	defer fd.Close()
+	defer func() {
+		_ = fd.Close()
+	}()
 
 	data, err := ioutil.ReadAll(fd)
 	if err != nil {
@@ -316,7 +318,9 @@ func (t *Topic) exit() {
 	if err != nil {
 		t.logger.Error(fmt.Sprintf("write %s.meta failed, %v", t.name, err))
 	}
-	defer fd.Close()
+	defer func() {
+		_ = fd.Close()
+	}()
 
 	// save all queue meta
 	t.queueMux.Lock()
@@ -456,10 +460,10 @@ func (t *Topic) set(configure *topicConfigure) error {
 
 // 声明队列，绑定key必须是唯一值
 // 队列名称为<topic_name>_<bind_key>
-func (t *Topic) delcareQueue(bindKey string) error {
+func (t *Topic) declareQueue(bindKey string) error {
 	queue := t.getQueueByBindKey(bindKey)
 	if queue != nil {
-		return fmt.Errorf("bindKey %s has exist.", bindKey)
+		return errors.Errorf("bindKey %s has exist.", bindKey)
 	}
 
 	t.queueMux.Lock()

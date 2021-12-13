@@ -72,10 +72,10 @@ func NewQueue(name, bindKey string, topic *Topic) *queue {
 		topic.logger.Error("get %s.queue stat failed, %v\n", queue.name, err)
 	}
 
-	initMmapSize := int(stat.Size())
+	initMMapSize := int(stat.Size())
 
 	// 初始文件为一个页大小
-	if initMmapSize == 0 {
+	if initMMapSize == 0 {
 		if _, err := f.WriteAt([]byte{'0'}, int64(os.Getpagesize())-1); err != nil {
 			topic.logger.Error("extend %v.queue failed, %v\n", queue.name, err)
 		}
@@ -90,14 +90,17 @@ func NewQueue(name, bindKey string, topic *Topic) *queue {
 			}
 		}
 
-		initMmapSize = os.Getpagesize()
+		initMMapSize = os.Getpagesize()
 	}
 
-	if data, err := mMap(f.Fd(), initMmapSize); err != nil {
-		return queue
-	} else {
-		queue.data = data
+	if err = queue.mmap(initMMapSize);err!=nil{
+		topic.logger.Error("%v",err)
 	}
+	//if data, err := mMap(f.Fd(), initMMapSize); err != nil {
+	//	return queue
+	//} else {
+	//	queue.data = data
+	//}
 
 	//if err := queue.mmap(initMmapSize); err != nil {
 	//	log.Fatalln(err)
@@ -151,7 +154,7 @@ func (q *queue) scan() ([]byte, error) {
 	// 消息结构 flag(1-byte) + status(2-bytes) + msg_len(4-bytes) + msg(n-bytes)
 	if flag := q.data[q.soffset]; flag != 'v' {
 		q.Unlock()
-		return nil, errors.New("unkown msg flag")
+		return nil, errors.New("unknown msg flag")
 	}
 
 	status := binary.BigEndian.Uint16(q.data[q.soffset+1 : q.soffset+3])
@@ -272,14 +275,14 @@ func (q *queue) ack(msgId uint64) error {
 
 	offset, ok := q.waitAck[msgId]
 	if !ok {
-		return fmt.Errorf("msgId:%v is not exist.", msgId)
+		return errors.Errorf("msgId:%v is not exist.", msgId)
 	}
 
 	if offset > int64(len(q.data))-1 {
-		return fmt.Errorf("ack.offset greather than queue.length.")
+		return errors.Errorf("ack.offset greater than queue.length.")
 	}
 	if q.data[offset] != 'v' {
-		return fmt.Errorf("ack.offset error.")
+		return errors.Errorf("ack.offset error.")
 	}
 
 	binary.BigEndian.PutUint16(q.data[offset+1:offset+3], MSG_STATUS_FIN)
@@ -305,10 +308,10 @@ func (q *queue) removeWait(msgId uint64) error {
 func (q *queue) mmap(size int) error {
 	stat, err := q.file.Stat()
 	if err != nil {
-		return fmt.Errorf("mmap %v.queue failed, %v.\n", q.name, err)
+		return errors.Errorf("mmap %v.queue failed, %v.\n", q.name, err)
 	}
 	if stat.Size() == 0 {
-		return fmt.Errorf("mmap %v.queue failed, file is empty.\n", q.name)
+		return errors.Errorf("mmap %v.queue failed, file is empty.\n", q.name)
 	}
 
 	// 解除上一次映射,如果有的话
@@ -355,8 +358,8 @@ func (q *queue) read(isAutoAck bool) (*readQueueData, error) {
 	// 消息结构 flag(1-byte) + status(2-bytes) + msg_len(4-bytes) + msg(n-bytes)
 	// msg又包括expire(8-bytes) + id(8-bytes) + retry(2-bytes) + body(n-bytes)
 	if flag := q.data[q.roffset]; flag != 'v' {
-		fmt.Println("xxxxx", string(flag), flag)
-		return nil, errors.New("unkown msg flag")
+		//fmt.Println("xxxxx", string(flag), flag)
+		return nil, errors.New("unknown msg flag")
 	}
 
 	msgLen := int64(binary.BigEndian.Uint32(q.data[q.roffset+3 : q.roffset+7]))
@@ -388,7 +391,7 @@ func (q *queue) updateMsgStatus(msgId uint64, offset int64, status int) {
 	}
 
 	if flag := q.data[offset]; flag != 'v' {
-		q.logger.Error(fmt.Sprintf("invaild offset, offset : %s", offset))
+		q.logger.Error(fmt.Sprintf("invaild offset, offset : %d", offset))
 		return
 	}
 
@@ -457,6 +460,33 @@ func (q *queue) grow() error {
 	}
 
 	q.logger.Info(fmt.Sprintf("grow %v.queue size to %v, and old is %v, default to %v", q.name, fz, q.filesize, GROW_SIZE))
-	q.filesize = fz
+	//q.filesize = fz
 	return nil
 }
+
+// 映射文件
+//func (q *queue) mmap(size int) error {
+//	stat, err := q.file.Stat()
+//	if err != nil {
+//		return fmt.Errorf("mmap %v.queue failed, %v.\n", q.name, err)
+//	}
+//	if stat.Size() == 0 {
+//		return fmt.Errorf("mmap %v.queue failed, file is empty.\n", q.name)
+//	}
+//
+//	// 解除上一次映射,如果有的话
+//	if len(q.data) > 0 {
+//		if err := q.unmap(); nil != err {
+//			return err
+//		}
+//	}
+//
+//	if data,err := mMap(q.file.Fd(), size); err != nil {
+//		return err
+//	}else {
+//		q.data
+//	}
+//
+//	q.filesize = stat.Size()
+//	return nil
+//}
