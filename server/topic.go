@@ -29,9 +29,9 @@ type Topic struct {
 	deadNum   int64
 	startTime time.Time
 	//ctx        *Context
-	closed bool
-	wg     common.WaitGroupWrapper
-	//dispatcher *Dispatcher
+	closed     bool
+	wg         common.WaitGroupWrapper
+	dispatcher *Dispatcher
 	exitChan   chan struct{}
 	queues     map[string]*queue
 	deadQueues map[string]*queue
@@ -199,6 +199,7 @@ type topicConfigure struct {
 func NewTopic(name string, cfg *config.Config) *Topic {
 	t := &Topic{
 		//ctx:        ctx,
+		cfg:       cfg,
 		name:      name,
 		msgTTR:    cfg.MsgTTR,
 		msgRetry:  cfg.MsgMaxRetry,
@@ -210,6 +211,7 @@ func NewTopic(name string, cfg *config.Config) *Topic {
 		queues:     make(map[string]*queue),
 		deadQueues: make(map[string]*queue),
 	}
+	t.logger = log.NewFileLogger(log.CfgOptionService("topic"))
 
 	t.init()
 	return t
@@ -576,7 +578,7 @@ func (t *Topic) push(msg *Msg, routeKey string) error {
 		}
 
 		msg.Expire = uint64(msg.Delay) + uint64(time.Now().Unix())
-		return t.pushMsgToBucket(&DelayMsg{msg, bindKeys})
+		return t.pushDelayMsg(&DelayMsg{msg, bindKeys})
 	}
 
 	for _, q := range queues {
@@ -590,31 +592,8 @@ func (t *Topic) push(msg *Msg, routeKey string) error {
 }
 
 // 延迟消息保存到bucket
-func (t *Topic) pushMsgToBucket(dg *DelayMsg) error {
-	err := t.db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte(t.name))
-		if err != nil {
-			return fmt.Errorf("create bucket: %s", err)
-		}
-
-		bucket := tx.Bucket([]byte(t.name))
-		key := creatBucketKey(dg.Msg.Id, dg.Msg.Expire)
-		t.logger.Info(fmt.Sprintf("%v-%v-%v write in bucket", dg.Msg.Id, string(dg.Msg.Body), key))
-
-		value, err := json.Marshal(dg)
-		if err != nil {
-			return err
-		}
-		if err := bucket.Put(key, value); err != nil {
-			return err
-		}
-
-		return nil
-	})
-
-	dg.Msg = nil
-	dg = nil
-	return err
+func (t *Topic) pushDelayMsg(dg *DelayMsg) error {
+	return t.dispatcher.pushDelayMsg(t.name, dg)
 }
 
 // bucket.key : delay + msgId
@@ -628,4 +607,75 @@ func creatBucketKey(msgId uint64, expire uint64) []byte {
 // 解析bucket.key
 func parseBucketKey(key []byte) (uint64, uint64) {
 	return binary.BigEndian.Uint64(key[:8]), binary.BigEndian.Uint64(key[8:])
+}
+
+// 检测超时消息
+func (t *Topic) retrievalQueueExpireMsg() error {
+	if t.closed {
+		err := errors.Errorf("topic.%s has exit.", t.name)
+		t.logger.Error("%v", err)
+		return err
+	}
+
+	num := 0
+	for _, queue := range t.queues {
+		for {
+			data, err := queue.scan()
+			if err != nil {
+				if err != ErrMessageNotExist && err != ErrMessageNotExpire {
+					t.logger.Error("%v", err)
+				}
+				break
+			}
+
+			msg := Decode(data)
+			if msg.Id == 0 {
+				msg = nil
+				break
+			}
+
+			if err := queue.removeWait(msg.Id); err != nil {
+				t.logger.Error("%v", err)
+				break
+			}
+
+			msg.Retry = msg.Retry + 1 // incr retry number
+			if msg.Retry > uint16(t.msgRetry) {
+				t.logger.Debug(fmt.Sprintf("msg.Id %v has been added to dead queue.", msg.Id))
+				if err := t.pushMsgToDeadQueue(msg, queue.bindKey); err != nil {
+					t.logger.Error("%v", err)
+					break
+				} else {
+					continue
+				}
+			}
+
+			// message is expired, and will be consumed again
+			if err := queue.write(Encode(msg)); err != nil {
+				t.logger.Error("%v", err)
+				break
+			} else {
+				t.logger.Debug(fmt.Sprintf("msg.Id %v has expired and will be consumed again.", msg.Id))
+				atomic.AddInt64(&t.pushNum, 1)
+				num++
+			}
+		}
+	}
+
+	if num > 0 {
+		return nil
+	} else {
+		return ErrMessageNotExist
+	}
+}
+
+// 添加消息到死信队列
+func (t *Topic) pushMsgToDeadQueue(msg *Msg, bindKey string) error {
+	queue := t.getDeadQueueByBindKey(bindKey, true)
+	if err := queue.write(Encode(msg)); err != nil {
+		return err
+	}
+
+	atomic.AddInt64(&t.deadNum, 1)
+	return nil
 }

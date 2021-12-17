@@ -93,8 +93,8 @@ func NewQueue(name, bindKey string, topic *Topic) *queue {
 		initMMapSize = os.Getpagesize()
 	}
 
-	if err = queue.mmap(initMMapSize);err!=nil{
-		topic.logger.Error("%v",err)
+	if err = queue.mmap(initMMapSize); err != nil {
+		topic.logger.Error("%v", err)
 	}
 	//if data, err := mMap(f.Fd(), initMMapSize); err != nil {
 	//	return queue
@@ -297,7 +297,7 @@ func (q *queue) removeWait(msgId uint64) error {
 
 	_, ok := q.waitAck[msgId]
 	if !ok {
-		return fmt.Errorf("msgId:%v is not exist.", msgId)
+		return errors.Errorf("msgId:%v is not exist.", msgId)
 	}
 
 	delete(q.waitAck, msgId)

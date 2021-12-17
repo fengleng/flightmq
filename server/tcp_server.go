@@ -23,10 +23,12 @@ type TcpServ struct {
 }
 
 func NewTcpServ(cfg *config.Config) *TcpServ {
-	return &TcpServ{
+	s := &TcpServ{
 		exitChan: make(chan struct{}),
 		cfg:      cfg,
 	}
+	s.logger = log.NewFileLogger(log.CfgOptionService("TcpServ"))
+	return s
 }
 
 func (s *TcpServ) Run() {
@@ -52,7 +54,6 @@ func (s *TcpServ) Run() {
 
 		_ = listen.Close()
 	}()
-
 	for {
 		conn, err := listen.Accept()
 		if err != nil {
@@ -61,13 +62,21 @@ func (s *TcpServ) Run() {
 		}
 
 		tcpConn := &TcpConn{
-			conn:     conn,
-			serv:     s,
-			exitChan: make(chan struct{}),
-			reader:   bufio.NewReaderSize(conn, 16*1024),
-			writer:   bufio.NewWriterSize(conn, 16*1024),
+			conn:         conn,
+			serv:         s,
+			exitChan:     make(chan struct{}),
+			connExitChan: make(chan struct{}),
+			reader:       bufio.NewReaderSize(conn, 16*1024),
+			writer:       bufio.NewWriterSize(conn, 16*1024),
 		}
 
 		s.wg.Wrap(tcpConn.Handle)
+
+		go func() {
+			select {
+			case <-s.exitChan:
+				tcpConn.exitChan <- struct{}{}
+			}
+		}()
 	}
 }

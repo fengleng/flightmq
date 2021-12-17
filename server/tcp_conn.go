@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/fengleng/flightmq/common"
-	"github.com/fengleng/flightmq/log"
 	"io"
 	"net"
 	"strconv"
@@ -16,23 +15,22 @@ import (
 )
 
 const (
-	RESP_MESSAGE = 101
-	RESP_ERROR   = 102
-	RESP_RESULT  = 103
-	RESP_CHANNEL = 104
-	RESP_PING    = 105
+	RespResult = 101
+	RespError  = 102
+	//RespPing    = 103
 )
 
 type TcpConn struct {
-	conn     net.Conn
-	serv     *TcpServ
-	wg       common.WaitGroupWrapper
-	exitChan chan struct{}
-	once     sync.Once
-	writer   *bufio.Writer
-	reader   *bufio.Reader
+	conn         net.Conn
+	serv         *TcpServ
+	wg           common.WaitGroupWrapper
+	exitChan     chan struct{}
+	connExitChan chan struct{}
+	once         sync.Once
+	writer       *bufio.Writer
+	reader       *bufio.Reader
 
-	logger log.Logger
+	//logger log.Logger
 }
 
 func (c *TcpConn) Send(respType int16, respData []byte) error {
@@ -47,7 +45,7 @@ func (c *TcpConn) Send(respType int16, respData []byte) error {
 // Handle <cmd_name> <param_1> ... <param_n>\n
 func (c *TcpConn) Handle() {
 	if err := c.conn.SetDeadline(time.Time{}); err != nil {
-		c.logger.Error(fmt.Sprintf("set deadlie failed, %s", err))
+		c.serv.logger.Error(fmt.Sprintf("set deadlie failed, %s", err))
 	}
 
 	var buf bytes.Buffer // todo 待优化
@@ -58,12 +56,12 @@ func (c *TcpConn) Handle() {
 		line, isPrefix, err := c.reader.ReadLine()
 		if err != nil {
 			if err != io.EOF {
-				c.logger.Error(fmt.Sprintf("connection error, %s", err))
+				c.serv.logger.Error(fmt.Sprintf("connection error, %s", err))
 			}
 			break
 		}
 		if len(line) == 0 {
-			c.logger.Error("cmd is empty")
+			c.serv.logger.Error("cmd is empty")
 			break
 		}
 		buf.Write(line)
@@ -73,11 +71,6 @@ func (c *TcpConn) Handle() {
 
 		params := bytes.Split(buf.Bytes(), []byte(" "))
 		buf.Reset() // reset buf after reading
-		if len(params) < 2 {
-			c.logger.Error("params must be greater than 2")
-			break
-		}
-
 		cmd := params[0]
 		params = params[1:]
 
@@ -101,28 +94,33 @@ func (c *TcpConn) Handle() {
 		case bytes.Equal(cmd, []byte("publish")):
 			err = c.PUBLISH(params)
 		case bytes.Equal(cmd, []byte("ping")):
-			c.PING()
+			err = c.PING()
 		default:
 			err = NewClientErr(ErrUnkownCmd, fmt.Sprintf("unkown cmd: %s", cmd))
 		}
 
 		if err != nil {
 			// response error to client
-			if err := c.Send(RESP_ERROR, []byte(err.Error())); err != nil {
+			if err := c.RespErr(err); err != nil {
 				break
 			}
-			// fatal error must be closed automatically
 			if _, ok := err.(*FatalClientErr); ok {
 				break
 			} else {
 				continue
 			}
 		}
+		select {
+		case <-c.exitChan:
+			break
+		default:
+
+		}
 	}
 
 	// force close conn
 	_ = c.conn.Close()
-	close(c.exitChan) // notify channel to remove connection
+	close(c.connExitChan) // notify channel to remove connection
 }
 
 // PUB <topic_name> <route_key> <delay-time>\n
@@ -159,11 +157,9 @@ func (c *TcpConn) PUB(params [][]byte) error {
 	if err != nil {
 		return NewFatalClientErr(ErrReadConn, err.Error())
 	}
-
-	if err := c.Send(RESP_RESULT, []byte(strconv.FormatUint(msgId, 10))); err != nil {
+	if err := c.RespRes([]byte(strconv.FormatUint(msgId, 10))); err != nil {
 		return NewFatalClientErr(ErrResp, err.Error())
 	}
-
 	return nil
 }
 
@@ -200,7 +196,8 @@ func (c *TcpConn) MPUB(params [][]byte) error {
 
 		var recvMsg RecvMsgData
 		if err := json.Unmarshal(msg, &recvMsg); err != nil {
-			c.RespErr(fmt.Errorf("decode msg failed, %s", err))
+			//c.RespErr(fmt.Errorf("decode msg failed, %s", err))
+			return err
 		}
 
 		msgId, err := c.serv.dispatcher.push(topic, recvMsg.RouteKey, []byte(recvMsg.Body), recvMsg.Delay)
@@ -216,7 +213,7 @@ func (c *TcpConn) MPUB(params [][]byte) error {
 		return NewClientErr(ErrJson, err.Error())
 	}
 
-	if err := c.Send(RESP_RESULT, nBytes); err != nil {
+	if err := c.RespRes(nBytes); err != nil {
 		return NewFatalClientErr(ErrResp, err.Error())
 	}
 
@@ -237,65 +234,26 @@ func (c *TcpConn) POP(params [][]byte) error {
 
 	bindKey := string(params[1])
 	t := c.serv.dispatcher.GetTopic(topic)
-	queue := t.getQueueByBindKey(bindKey)
-	if queue == nil {
-		return NewClientErr(ErrPopMsg, fmt.Sprintf("bindKey:%s can't match queue", bindKey))
-	}
 
 	msg, err := t.pop(bindKey)
-	if err!=nil {
-		return NewClientErr(ErrPopMsg,fmt.Sprintf("bindKey:%s can't pop data", bindKey))
-	}
-
-//	var msg *Msg
-//	ticker := time.NewTicker(time.Duration(t.cfg.HeartbeatInterval) * time.Second)
-//	defer ticker.Stop()
-//
-//	var queueData *readQueueData
-//	for {
-//		select {
-//		case <-t.exitChan:
-//			return NewFatalClientErr(ErrReadConn, "closed.")
-//		case <-ticker.C:
-//			// when there is no message, a heartbeat packet is sent.
-//			// sending fails express the client is disconnected
-//			if err := c.Send(RESP_PING, []byte{'p', 'i', 'n', 'g'}); err != nil {
-//				return NewFatalClientErr(ErrPopMsg, "closed.")
-//			}
-//			continue
-//		case queueData = <-queue.readChan:
-//			if queueData != nil {
-//				msg = Decode(queueData.data)
-//				if msg.Id == 0 {
-//					return NewClientErr(ErrPopMsg, "message decode failed.")
-//				}
-//				goto exitLoop
-//			}
-//		}
-//	}
-//
-//exitLoop:
-	msgData := RespMsgData{}
-	msgData.Body = string(msg.Body)
-	msgData.Retry = msg.Retry
-	msgData.Id = strconv.FormatUint(msg.Id, 10)
-	data, err := json.Marshal(msgData)
 	if err != nil {
-		return NewClientErr(ErrJson, err.Error())
+		return NewClientErr(ErrPopMsg, fmt.Sprintf("bindKey:%s can't pop data", bindKey))
 	}
-
-	if err := c.Send(RESP_MESSAGE, data); err != nil {
+	if err := c.RespMsg(msg); err != nil {
+		q := t.getQueueByBindKey(bindKey)
+		if q == nil {
+			return NewClientErr(ErrPopMsg, fmt.Sprintf("bindKey:%s can't match queue", bindKey))
+		}
 		if !t.isAutoAck {
-			_ = queue.ack(msg.Id)
+			_ = q.ack(msg.Id)
 		}
 
 		// client disconnected unexpectedly
 		// add to the queue again to ensure message is not lose
-		c.logger.Error(fmt.Sprintf("client disconnected unexpectedly, the message is written to queue again. message.id %d", msg.Id))
-		_ = queue.write(Encode(msg))
+		c.serv.logger.Error(fmt.Sprintf("client disconnected unexpectedly, the message is written to queue again. message.id %d", msg.Id))
+		_ = q.write(Encode(msg))
 		return NewFatalClientErr(ErrReadConn, err.Error())
 	}
-
 	return nil
 }
 
@@ -314,7 +272,7 @@ func (c *TcpConn) ACK(params [][]byte) error {
 		return NewClientErr(ErrAckMsg, err.Error())
 	}
 
-	if err := c.Send(RESP_RESULT, []byte{'o', 'k'}); err != nil {
+	if err := c.RespOk(); err != nil {
 		return NewFatalClientErr(ErrResp, err.Error())
 	}
 
@@ -335,15 +293,7 @@ func (c *TcpConn) DEAD(params [][]byte) error {
 		return NewClientErr(ErrDead, err.Error())
 	}
 
-	msgData := RespMsgData{}
-	msgData.Body = string(msg.Body)
-	msgData.Retry = msg.Retry
-	msgData.Id = strconv.FormatUint(msg.Id, 10)
-	data, err := json.Marshal(msgData)
-	if err != nil {
-		return NewClientErr(ErrJson, err.Error())
-	}
-	if err := c.Send(RESP_MESSAGE, data); err != nil {
+	if err := c.RespMsg(msg); err != nil {
 		return NewFatalClientErr(ErrResp, err.Error())
 	}
 
@@ -365,7 +315,14 @@ func (c *TcpConn) SET(params [][]byte) error {
 	configure.msgTTR, _ = strconv.Atoi(string(params[3]))
 	configure.msgRetry, _ = strconv.Atoi(string(params[4]))
 
-	return c.serv.dispatcher.Set(topic, configure)
+	err := c.serv.dispatcher.Set(topic, configure)
+	if err != nil {
+		return NewClientErr(ErrSet, err.Error())
+	}
+	if err := c.RespOk(); err != nil {
+		return NewFatalClientErr(ErrResp, err.Error())
+	}
+	return nil
 }
 
 // DECLAREQUEUE declare queue
@@ -387,7 +344,7 @@ func (c *TcpConn) DECLAREQUEUE(params [][]byte) error {
 	if err := c.serv.dispatcher.declareQueue(topic, bindKey); err != nil {
 		return NewClientErr(ErrDeclare, err.Error())
 	}
-	if err := c.Send(RESP_RESULT, []byte{'o', 'k'}); err != nil {
+	if err := c.RespOk(); err != nil {
 		return NewFatalClientErr(ErrResp, err.Error())
 	}
 
@@ -410,7 +367,7 @@ func (c *TcpConn) SUBSCRIBE(params [][]byte) error {
 		return NewClientErr(ErrSubscribe, err.Error())
 	}
 
-	if err := c.Send(RESP_RESULT, []byte{'o', 'k'}); err != nil {
+	if err := c.RespOk(); err != nil {
 		return NewFatalClientErr(ErrResp, err.Error())
 	}
 
@@ -447,22 +404,22 @@ func (c *TcpConn) PUBLISH(params [][]byte) error {
 		return NewClientErr(ErrPublish, err.Error())
 	}
 
-	if err := c.Send(RESP_RESULT, []byte{'o', 'k'}); err != nil {
+	if err := c.RespOk(); err != nil {
 		return NewFatalClientErr(ErrResp, err.Error())
 	}
 
 	return nil
 }
 
-func (c *TcpConn) PING() {
-	_ = c.conn.SetDeadline(time.Now().Add(5 * time.Second))
+func (c *TcpConn) PING() error {
+	return c.RespPing()
 }
 
 func (c *TcpConn) exit() {
-	c.conn.Close()
+	_ = c.conn.Close()
 }
 
-func (c *TcpConn) RespMsg(msg *Msg) bool {
+func (c *TcpConn) RespMsg(msg *Msg) error {
 	msgData := RespMsgData{}
 	msgData.Body = string(msg.Body)
 	msgData.Retry = msg.Retry
@@ -470,32 +427,50 @@ func (c *TcpConn) RespMsg(msg *Msg) bool {
 
 	data, err := json.Marshal(msgData)
 	if err != nil {
-		c.logger.Error("%v",err)
-		return false
+		c.serv.logger.Error("%v", err)
+		return err
 	}
 
-	err = c.Send(RESP_MESSAGE, data)
+	err = c.Send(RespResult, data)
 	if err != nil {
-		c.logger.Error("%v",err)
-		return false
+		c.serv.logger.Error("%v", err)
+		return err
 	}
-	return true
+	return nil
 }
 
-func (c *TcpConn) RespErr(err error) bool {
-	err2 := c.Send(RESP_ERROR, []byte(err.Error()))
+func (c *TcpConn) RespErr(err error) error {
+	err2 := c.Send(RespError, []byte(err.Error()))
 	if err2 != nil {
-		c.logger.Error("%v",err)
-		return false
+		c.serv.logger.Error("%v", err)
+		return err2
 	}
-	return false
+	return nil
 }
 
-func (c *TcpConn) RespRes(msg string) bool {
-	err := c.Send(RESP_RESULT, []byte(msg))
+func (c *TcpConn) RespRes(res []byte) error {
+	err := c.Send(RespResult, res)
 	if err != nil {
-		c.logger.Error("%v",err)
-		return false
+		c.serv.logger.Error("%v", err)
+		return err
 	}
-	return true
+	return nil
+}
+
+func (c *TcpConn) RespOk() error {
+	err := c.Send(RespResult, []byte("ok"))
+	if err != nil {
+		c.serv.logger.Error("%v", err)
+		return err
+	}
+	return nil
+}
+
+func (c *TcpConn) RespPing() error {
+	err := c.Send(RespResult, []byte("ping"))
+	if err != nil {
+		c.serv.logger.Error("%v", err)
+		return err
+	}
+	return nil
 }

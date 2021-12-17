@@ -27,7 +27,7 @@ func NewChannel(key string) *Channel {
 		exitChan:    make(chan struct{}),
 		conns:       make(map[*TcpConn]bool),
 		pushMsgChan: make(chan []byte),
-		logger: log.NewFileLogger(),
+		logger:      log.NewFileLogger(),
 	}
 	ch.wg.Wrap(ch.distribute)
 	return ch
@@ -53,7 +53,7 @@ func (c *Channel) addConn(tcpConn *TcpConn) error {
 	c.wg.Wrap(func() {
 		start <- struct{}{}
 		select {
-		case <-tcpConn.exitChan:
+		case <-tcpConn.connExitChan:
 			// delete connection on close
 			//c.LogInfo(fmt.Sprintf("connection %s has exit.", tcpConn.conn.RemoteAddr()))
 			delete(c.conns, tcpConn)
@@ -101,7 +101,7 @@ func (c *Channel) distribute() {
 		case msg := <-c.pushMsgChan:
 			c.RLock()
 			for tcpConn, _ := range c.conns {
-				_ = tcpConn.Send(RESP_CHANNEL, msg)
+				_ = tcpConn.Send(RespResult, msg)
 			}
 			c.RUnlock()
 		}

@@ -5,7 +5,10 @@ import (
 	"github.com/fengleng/flightmq/config"
 	"github.com/fengleng/flightmq/log"
 	"github.com/fengleng/flightmq/mq_errors"
+	"os"
+	"os/signal"
 	"sync/atomic"
+	"syscall"
 )
 
 type Server struct {
@@ -45,8 +48,17 @@ func (s *Server) Run() error {
 	tcpServer := NewTcpServ(s.cfg)
 
 	tcpServer.dispatcher = dispatcher
+	tcpServer.srv = s
 
 	s.wg.Wrap(tcpServer.Run)
 
 	return nil
+}
+
+func (s *Server) Exit() {
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc, syscall.SIGTERM, syscall.SIGINT, syscall.SIGKILL, syscall.SIGQUIT)
+	<-sc
+	close(s.exitChan)
+	s.wg.Wait()
 }

@@ -215,12 +215,12 @@ func (c *Config) SetDefault() {
 
 	// 数据存储目录,相对于命令执行所在目录,例如在/home执行启动命令,将会生成/home/data目录
 	if len(c.DataSavePath) == 0 {
-		c.DataSavePath = "data/gnode"
+		c.DataSavePath = "data/flightMq"
 	}
 
 	// log default config
 	if len(c.LogFilename) == 0 {
-		c.LogFilename = "gnode.log"
+		c.LogFilename = "flightMq.log"
 	}
 	if c.LogLevel <= 0 {
 		c.LogLevel = 4

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/boltdb/bolt"
 	"github.com/fengleng/flightmq/common"
@@ -8,16 +9,20 @@ import (
 	"github.com/fengleng/flightmq/log"
 	"github.com/pingcap/errors"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 type Dispatcher struct {
 	//ctx        *Context
-	db        *bolt.DB
-	wg        common.WaitGroupWrapper
-	closed    bool
-	poolSize  int
-	snowflake *common.Snowflake
-	exitChan  chan struct{}
+	db *bolt.DB
+	wg common.WaitGroupWrapper
+	//scanWg        common.WaitGroupWrapper
+	scanQueueExpireMsgWg common.WaitGroupWrapper
+	closed               bool
+	poolSize             int
+	snowflake            *common.Snowflake
+	exitChan             chan struct{}
 
 	// topic
 	topics   map[string]*Topic
@@ -42,7 +47,7 @@ func NewDispatcher(cfg *config.Config) *Dispatcher {
 		panic(err)
 	}
 
-	dbFile := fmt.Sprintf("%s/gmq.db", cfg.DataSavePath)
+	dbFile := fmt.Sprintf("%s/flightMq.db", cfg.DataSavePath)
 	db, err := bolt.Open(dbFile, 0600, nil)
 	if err != nil {
 		panic(err)
@@ -63,17 +68,107 @@ func NewDispatcher(cfg *config.Config) *Dispatcher {
 }
 
 func (d *Dispatcher) Run() {
-
-	defer d.logger.Info("dispatcher exit.")
-	//d.wg.Wrap(d.scanLoop)
-
-	//for _, topic := range d.topics {
-	//
-	//}
+	defer d.logger.Info("dispatcher exit")
+	d.wg.Wrap(d.scanDelayMsg)
+	d.wg.Wrap(d.scanQueueExpireMsg)
 
 	select {
 	case <-d.srv.exitChan:
 		d.exit()
+	}
+}
+
+func (d *Dispatcher) scanQueueExpireMsg() {
+	d.logger.Info("begin scan queue expire msg")
+	ticker := time.NewTicker(time.Second)
+	//var wg sync.WaitGroup
+	for {
+		select {
+		case <-ticker.C:
+			for _, t := range d.topics {
+				d.scanQueueExpireMsgWg.Wrap(func() {
+					err := t.retrievalQueueExpireMsg()
+					if err != nil {
+						t.logger.Error("%v", err)
+					}
+				})
+
+			}
+			d.scanQueueExpireMsgWg.Wait()
+		case <-d.exitChan:
+			return
+		}
+	}
+}
+
+func (d *Dispatcher) scanDelayMsg() {
+	d.logger.Info("begin scan delay msg")
+	ticker := time.NewTicker(time.Second)
+	for {
+		select {
+		case <-ticker.C:
+			err := d.db.Update(func(tx *bolt.Tx) error {
+				err := tx.ForEach(func(name []byte, b *bolt.Bucket) error {
+					if b.Stats().KeyN == 0 {
+						return nil
+					}
+					now := time.Now().Unix()
+					cursor := b.Cursor()
+
+					for key, data := cursor.First(); key != nil; key, data = cursor.Next() {
+						delayTime, _ := parseBucketKey(key)
+						if now < int64(delayTime) {
+							continue
+						}
+						var dg DelayMsg
+						var t *Topic
+						var err error
+						if err := json.Unmarshal(data, &dg); err != nil {
+							d.logger.Error("decode delay message failed, %s topic:%v", err, string(name))
+							goto deleteBucketElem
+						}
+						if dg.Msg.Id == 0 {
+							d.logger.Error("invalid delay message. topic:%v", string(name))
+							goto deleteBucketElem
+						}
+						t, err = d.GetExistTopic(string(name))
+						if err != nil {
+							d.logger.Error("%v", err)
+							break
+						}
+						for _, bindKey := range dg.BindKeys {
+							queue := t.getQueueByBindKey(bindKey)
+							if queue == nil {
+								t.logger.Error(fmt.Sprintf("bindkey:%s is not associated with queue", bindKey))
+								continue
+							}
+							if err := queue.write(Encode(dg.Msg)); err != nil {
+								t.logger.Error("%v", err)
+								continue
+							}
+							atomic.AddInt64(&t.pushNum, 1)
+							//num++
+						}
+					deleteBucketElem:
+						if err := b.Delete(key); err != nil {
+							d.logger.Error("%v", err)
+						}
+					}
+
+					return nil
+				})
+				if err != nil {
+					d.logger.Error("%v", err)
+					return err
+				}
+				return nil
+			})
+			if err != nil {
+				d.logger.Error("%v", err)
+			}
+		case <-d.exitChan:
+			return
+		}
 	}
 }
 
@@ -189,6 +284,7 @@ func (d *Dispatcher) GetTopic(name string) *Topic {
 
 	d.topicMux.Lock()
 	t := NewTopic(name, d.srv.cfg)
+	t.dispatcher = d
 	d.topics[name] = t
 	d.topicMux.Unlock()
 	return t
@@ -257,7 +353,6 @@ func (d *Dispatcher) push(name string, routeKey string, data []byte, delay int) 
 
 	topic := d.GetTopic(name)
 	err := topic.push(msg, routeKey)
-	msg = nil
 
 	return msgId, err
 }
@@ -301,4 +396,28 @@ func (d *Dispatcher) subscribe(channelName string, conn *TcpConn) error {
 func (d *Dispatcher) publish(channelName string, msg []byte) error {
 	channel := d.GetChannel(channelName)
 	return channel.publish(msg)
+}
+
+func (d *Dispatcher) pushDelayMsg(topicName string, dg *DelayMsg) error {
+	err := d.db.Update(func(tx *bolt.Tx) error {
+		bucket, err := tx.CreateBucketIfNotExists([]byte(topicName))
+		if err != nil {
+			return fmt.Errorf("create bucket: %s", err)
+		}
+
+		//bucket := tx.Bucket([]byte(topicName))
+		key := creatBucketKey(dg.Msg.Id, dg.Msg.Expire)
+		d.logger.Info(fmt.Sprintf("%v-%v-%v write in bucket", dg.Msg.Id, string(dg.Msg.Body), key))
+
+		value, err := json.Marshal(dg)
+		if err != nil {
+			return err
+		}
+		if err := bucket.Put(key, value); err != nil {
+			return err
+		}
+
+		return nil
+	})
+	return err
 }

@@ -7,7 +7,6 @@ import (
 )
 
 func main() {
-
 	cfg, err := config.NewConfig()
 	if err != nil {
 		log.Fatal("init cfg err %v", err)
@@ -21,5 +20,5 @@ func main() {
 		log.Fatal("init cfg err %v", err)
 		return
 	}
-
+	srv.Exit()
 }
