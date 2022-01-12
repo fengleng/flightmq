@@ -12,4 +12,5 @@ var (
 	ErrMqIsRunning         = errors.New("mq is running")
 	ErrMqLoadingRunning    = errors.New("mq loading running fail")
 	ErrQueueClosed         = errors.New("queue has been closed.")
+	ErrQueueNotMsg         = errors.New("queue has not msg")
 )

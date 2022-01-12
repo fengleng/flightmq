@@ -181,9 +181,6 @@ func (d *Dispatcher) exit() {
 	for _, t := range d.topics {
 		t.exit()
 	}
-	//for _, c := range d.channels {
-	//	c.exit()
-	//}
 
 	d.wg.Wait()
 }

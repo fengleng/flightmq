@@ -48,8 +48,7 @@ type readQueueData struct {
 
 func NewQueue(name, bindKey string, topic *Topic) *queue {
 	queue := &queue{
-		name: name,
-		//ctx:      ctx,
+		name:     name,
 		topic:    topic,
 		bindKey:  bindKey,
 		waitAck:  make(map[uint64]int64),
@@ -57,6 +56,9 @@ func NewQueue(name, bindKey string, topic *Topic) *queue {
 		exitChan: make(chan struct{}),
 
 		notifyReadMsgChan: make(chan bool),
+
+		logger: topic.logger,
+		cfg:    topic.cfg,
 	}
 
 	path := fmt.Sprintf("%s/%s.queue", topic.cfg.DataSavePath, name)
@@ -128,11 +130,10 @@ func (q *queue) scan() ([]byte, error) {
 	}
 
 	q.Lock()
-	// q.LogDebug(fmt.Sprintf("scan.offset:%v read.offset:%v write.offset:%v", q.soffset, q.roffset, q.woffset))
-
 	if q.soffset > REWRITE_SIZE {
 		if err := q.rewrite(); err != nil {
 			q.logger.Error("%v", err)
+			return nil, err
 		}
 	}
 	if q.soffset == q.roffset {
@@ -340,7 +341,7 @@ func (q *queue) read(isAutoAck bool) (*readQueueData, error) {
 		hasMsg := <-q.notifyReadMsgChan
 		q.Lock()
 		if !hasMsg {
-			return nil, nil
+			return nil, mq_errors.ErrQueueNotMsg
 		}
 	}
 

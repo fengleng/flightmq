@@ -45,11 +45,15 @@ type Topic struct {
 }
 
 type TopicMeta struct {
-	Mode       int         `json:"mode"`
-	PopNum     int64       `json:"pop_num"`
-	PushNum    int64       `json:"push_num"`
-	DeadNum    int64       `json:"dead_num"`
-	IsAutoAck  bool        `json:"is_auto_ack"`
+	MsgTTR    int  `json:"msg_ttr"`
+	MsgRetry  int  `json:"msg_retry"`
+	Mode      int  `json:"mode"`
+	IsAutoAck bool `json:"is_auto_ack"`
+
+	PopNum  int64 `json:"pop_num"`
+	PushNum int64 `json:"push_num"`
+	DeadNum int64 `json:"dead_num"`
+
 	Queues     []QueueMeta `json:"queues"`
 	DeadQueues []QueueMeta `json:"dead_queues"`
 }
@@ -328,6 +332,8 @@ func (t *Topic) Serialize() error {
 	}
 
 	meta := TopicMeta{
+		MsgRetry:   t.msgRetry,
+		MsgTTR:     t.msgTTR,
 		PopNum:     t.popNum,
 		PushNum:    t.pushNum,
 		DeadNum:    t.deadNum,
