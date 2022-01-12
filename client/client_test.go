@@ -1,6 +1,9 @@
 package client
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestClient_Set(t *testing.T) {
 	client := NewClient("127.0.0.1:9503", 1)
@@ -27,7 +30,7 @@ func TestClient_Declare(t *testing.T) {
 
 func TestClient_Push(t *testing.T) {
 	c := NewClient("127.0.0.1:9503", 1)
-	bytes, err := c.Push(MsgPkg{Topic: "test1", Delay: 0, RouteKey: "queue1", Body: "retry2"})
+	bytes, err := c.Push(MsgPkg{Topic: "test1", Delay: 0, RouteKey: "queue1", Body: "TestClientPopAndAck"})
 	t.Log(err)
 	t.Log(string(bytes))
 }
@@ -39,10 +42,32 @@ func TestClientSet(t *testing.T) {
 	t.Log(string(bytes))
 }
 
-func TestClient_Pop(t *testing.T) {
+func TestClientForPop(t *testing.T) {
 	for true {
 		c := NewClient("127.0.0.1:9503", 1)
 		bytes, err := c.Pop("test1", "queue1")
+		t.Log(err)
+		t.Log(string(bytes))
+	}
+}
+
+func TestClientPopAndAck(t *testing.T) {
+	c := NewClient("127.0.0.1:9503", 1)
+	bytes, err := c.Pop("test1", "queue1")
+	t.Log(err)
+
+	var m RespMsgData
+	err = json.Unmarshal(bytes, &m)
+	t.Log(err)
+	t.Log(string(bytes))
+	err = c.Ack("test1", m.Id, "queue1")
+	t.Log(err)
+}
+
+func TestClientDead(t *testing.T) {
+	for true {
+		c := NewClient("127.0.0.1:9503", 1)
+		bytes, err := c.Dead("test1", "queue1")
 		t.Log(err)
 		t.Log(string(bytes))
 	}

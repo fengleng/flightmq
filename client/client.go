@@ -42,6 +42,12 @@ type MMsgPkg struct {
 	Delay int
 }
 
+type RespMsgData struct {
+	Id    string `json:"id"`
+	Body  string `json:"body"`
+	Retry uint16 `json:"retry_count"`
+}
+
 type Client struct {
 	conn   net.Conn
 	addr   string
@@ -101,9 +107,9 @@ func (c *Client) Pop(topic, bindKey string) ([]byte, error) {
 
 // Dead 消费消息
 // dead <topic_name> <bind_key>
-func (c *Client) Dead(topic, bindKey string) error {
+func (c *Client) Dead(topic, bindKey string) ([]byte, error) {
 	if len(topic) == 0 {
-		return ErrTopicEmpty
+		return nil, ErrTopicEmpty
 	}
 
 	var params [][]byte
@@ -112,13 +118,16 @@ func (c *Client) Dead(topic, bindKey string) error {
 	params = append(params, []byte(bindKey))
 	line := bytes.Join(params, []byte(" "))
 	if _, err := c.conn.Write(line); err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := c.conn.Write([]byte{'\n'}); err != nil {
-		return err
+		return nil, err
 	}
-
-	return nil
+	respType, nBytes := c.Receive()
+	if respType == server.RespError {
+		return nil, errors.New(string(nBytes))
+	}
+	return nBytes, nil
 }
 
 // 死信
@@ -210,13 +219,13 @@ func (c *Client) Push(pkg MsgPkg) ([]byte, error) {
 // mpub <topic_name> <num>
 // <msg.len> <[]byte({"delay":1,"body":"xxx","topic":"xxx","routeKey":"xxx"})>
 // <msg.len> <[]byte({"delay":1,"body":"xxx","topic":"xxx","routeKey":"xxx"})>
-func (c *Client) Mpush(topic string, msgs []MMsgPkg, routeKey string) error {
+func (c *Client) Mpush(topic string, msgs []MMsgPkg, routeKey string) ([]uint64, error) {
 	if len(topic) == 0 {
-		return ErrTopicEmpty
+		return nil, ErrTopicEmpty
 	}
 	lmsg := len(msgs)
 	if lmsg == 0 {
-		return errors.New("msgs is empty")
+		return nil, errors.New("msgs is empty")
 	}
 
 	var params [][]byte
@@ -225,10 +234,10 @@ func (c *Client) Mpush(topic string, msgs []MMsgPkg, routeKey string) error {
 	params = append(params, []byte(strconv.Itoa(lmsg)))
 	line := bytes.Join(params, []byte(" "))
 	if _, err := c.conn.Write(line); err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := c.conn.Write([]byte{'\n'}); err != nil {
-		return err
+		return nil, err
 	}
 
 	for i := 0; i < lmsg; i++ {
@@ -238,23 +247,30 @@ func (c *Client) Mpush(topic string, msgs []MMsgPkg, routeKey string) error {
 			Topic:    topic,
 			RouteKey: routeKey,
 		}
-		nbyte, err := json.Marshal(pkg)
+		nByte, err := json.Marshal(pkg)
 		if err != nil {
 			log.Println(err)
 			continue
 		}
 
-		bodylen := make([]byte, 4)
-		binary.BigEndian.PutUint32(bodylen, uint32(len(nbyte)))
-		if _, err := c.conn.Write(bodylen); err != nil {
-			return err
+		bodyLen := make([]byte, 4)
+		binary.BigEndian.PutUint32(bodyLen, uint32(len(nByte)))
+		if _, err := c.conn.Write(bodyLen); err != nil {
+			return nil, err
 		}
-		if _, err := c.conn.Write(nbyte); err != nil {
-			return err
+		if _, err := c.conn.Write(nByte); err != nil {
+			return nil, err
 		}
 	}
-
-	return nil
+	respType, nBytes := c.Receive()
+	if respType == server.RespError {
+		return nil, errors.New(string(nBytes))
+	}
+	msgIds := make([]uint64, 0)
+	if err := json.Unmarshal(nBytes, &msgIds); err != nil {
+		return nil, err
+	}
+	return msgIds, nil
 }
 
 // Ack 确认已消费消息
@@ -276,7 +292,10 @@ func (c *Client) Ack(topic, msgId, bindKey string) error {
 	if _, err := c.conn.Write([]byte{'\n'}); err != nil {
 		return err
 	}
-
+	respType, nBytes := c.Receive()
+	if respType == server.RespError {
+		return errors.New(string(nBytes))
+	}
 	return nil
 }
 
@@ -467,15 +486,15 @@ func Example_Ack(c *Client, topic, msgId, bindKey string) {
 //	log.Println(fmt.Sprintf("rtype:%v, result:%v", rtype, string(data)))
 //}
 
-func Example_Dead(c *Client, topic, bindKey string) {
-	if err := c.Dead(topic, bindKey); err != nil {
-		log.Println(err)
-	}
-
-	// receive response
-	rtype, data := c.Receive()
-	log.Println(fmt.Sprintf("rtype:%v, result:%v", rtype, string(data)))
-}
+//func Example_Dead(c *Client, topic, bindKey string) {
+//	if err := c.Dead(topic, bindKey); err != nil {
+//		log.Println(err)
+//	}
+//
+//	// receive response
+//	rtype, data := c.Receive()
+//	log.Println(fmt.Sprintf("rtype:%v, result:%v", rtype, string(data)))
+//}
 
 // 死信
 func Example_Dead_back(c *Client, topic string, num int) {
