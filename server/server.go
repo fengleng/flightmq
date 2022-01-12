@@ -42,14 +42,11 @@ func (s *Server) Run() error {
 
 	dispatcher := NewDispatcher(s.cfg)
 	dispatcher.srv = s
-
 	s.wg.Wrap(dispatcher.Run)
 
 	tcpServer := NewTcpServ(s.cfg)
-
 	tcpServer.dispatcher = dispatcher
 	tcpServer.srv = s
-
 	s.wg.Wrap(tcpServer.Run)
 
 	return nil
