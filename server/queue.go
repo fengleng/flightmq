@@ -96,17 +96,6 @@ func NewQueue(name, bindKey string, topic *Topic) *queue {
 	if err = queue.mmap(initMMapSize); err != nil {
 		topic.logger.Error("%v", err)
 	}
-	//if data, err := mMap(f.Fd(), initMMapSize); err != nil {
-	//	return queue
-	//} else {
-	//	queue.data = data
-	//}
-
-	//if err := queue.mmap(initMmapSize); err != nil {
-	//	log.Fatalln(err)
-	//}
-
-	//queue.wg.Wrap(queue.loopRead)
 	return queue
 }
 

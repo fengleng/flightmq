@@ -103,7 +103,7 @@ func (d *Dispatcher) scanQueueExpireMsg() {
 
 func (d *Dispatcher) scanDelayMsg() {
 	d.logger.Info("begin scan delay msg")
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
 	for {
 		select {
 		case <-ticker.C:

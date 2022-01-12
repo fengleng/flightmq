@@ -27,7 +27,7 @@ func TestClient_Declare(t *testing.T) {
 
 func TestClient_Push(t *testing.T) {
 	c := NewClient("127.0.0.1:9503", 1)
-	bytes, err := c.Push(MsgPkg{Topic: "test1", Delay: 5, RouteKey: "queue1", Body: "hello"})
+	bytes, err := c.Push(MsgPkg{Topic: "test1", Delay: 0, RouteKey: "queue1", Body: "hello20"})
 	t.Log(err)
 	t.Log(string(bytes))
 }
@@ -35,6 +35,20 @@ func TestClient_Push(t *testing.T) {
 func TestClient_Pop(t *testing.T) {
 	c := NewClient("127.0.0.1:9503", 1)
 	bytes, err := c.Pop("test1", "queue1")
+	t.Log(err)
+	t.Log(string(bytes))
+}
+
+func TestClientPushDefault(t *testing.T) {
+	c := NewClient("127.0.0.1:9503", 1)
+	bytes, err := c.Push(MsgPkg{Topic: "test5", Delay: 0, RouteKey: "queue1", Body: "hello20"})
+	t.Log(err)
+	t.Log(string(bytes))
+}
+
+func TestClientPopDefault(t *testing.T) {
+	c := NewClient("127.0.0.1:9503", 1)
+	bytes, err := c.Pop("test4", "")
 	t.Log(err)
 	t.Log(string(bytes))
 }

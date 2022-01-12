@@ -300,6 +300,7 @@ func (c *TcpConn) DEAD(params [][]byte) error {
 	return nil
 }
 
+// SET topic isAutoAck mode msgTTR msgRetry
 func (c *TcpConn) SET(params [][]byte) error {
 	if len(params) != 5 {
 		return NewFatalClientErr(ErrParams, "params equal 5")

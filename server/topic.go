@@ -29,14 +29,15 @@ type Topic struct {
 	deadNum   int64
 	startTime time.Time
 	//ctx        *Context
-	closed     bool
-	wg         common.WaitGroupWrapper
-	dispatcher *Dispatcher
-	exitChan   chan struct{}
-	queues     map[string]*queue
-	deadQueues map[string]*queue
-	waitAckMux sync.Mutex
-	queueMux   sync.Mutex
+	closed       bool
+	wg           common.WaitGroupWrapper
+	dispatcher   *Dispatcher
+	exitChan     chan struct{}
+	queues       map[string]*queue
+	deadQueues   map[string]*queue
+	waitAckMux   sync.Mutex
+	queueMux     sync.Mutex
+	deadQueueMux sync.Mutex
 	sync.Mutex
 
 	db     *bolt.DB
@@ -219,15 +220,6 @@ func NewTopic(name string, cfg *config.Config) *Topic {
 
 // 初始化
 func (t *Topic) init() {
-	//err := t.dispatcher.db.Update(func(tx *bolt.Tx) error {
-	//	if _, err := tx.CreateBucketIfNotExists([]byte(t.name)); err != nil {
-	//		return errors.New(fmt.Sprintf("create bucket: %s", err))
-	//	}
-	//	return nil
-	//})
-	//if err != nil {
-	//	panic(err)
-	//}
 
 	t.logger.Info(fmt.Sprintf("loading topic.%s metadata.", t.name))
 
@@ -266,9 +258,9 @@ func (t *Topic) init() {
 	// restore queue meta data
 	for _, q := range meta.Queues {
 		// skip empty queue
-		if q.Num == 0 {
-			continue
-		}
+		//if q.Num == 0 {
+		//	continue
+		//}
 
 		queue := NewQueue(q.Name, q.BindKey, t)
 		queue.woffset = q.WriteOffset
@@ -284,9 +276,9 @@ func (t *Topic) init() {
 	// restore dead queue meta data
 	for _, q := range meta.DeadQueues {
 		// skip empty queue
-		if q.Num == 0 {
-			continue
-		}
+		//if q.Num == 0 {
+		//	continue
+		//}
 
 		queue := NewQueue(q.Name, q.BindKey, t)
 		queue.woffset = q.WriteOffset
@@ -300,37 +292,21 @@ func (t *Topic) init() {
 	}
 }
 
-// 解析bucket.key
-//func parseBucketKey(key []byte) (uint64, uint64) {
-//	return binary.BigEndian.Uint64(key[:8]), binary.BigEndian.Uint64(key[8:])
-//}
-
-// 退出topic
-func (t *Topic) exit() {
-	defer t.logger.Info(fmt.Sprintf("topic.%s has exit.", t.name))
-
-	//t.ctx.Dispatcher.RemoveTopic(t.name)
-
-	t.closed = true
-	close(t.exitChan)
-	t.wg.Wait()
-
+func (t *Topic) Serialize() error {
+	t.Lock()
+	defer t.Unlock()
 	t.logger.Info(fmt.Sprintf("writing topic.%s metadata.", t.name))
 	fd, err := os.OpenFile(fmt.Sprintf("%s/%s.meta", t.cfg.DataSavePath, t.name), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		t.logger.Error(fmt.Sprintf("write %s.meta failed, %v", t.name, err))
+		return err
 	}
 	defer func() {
 		_ = fd.Close()
 	}()
 
-	// save all queue meta
-	t.queueMux.Lock()
-	defer t.queueMux.Unlock()
-
 	var queues []QueueMeta
 	for k, q := range t.queues {
-		q.exit()
 		queues = append(queues, QueueMeta{
 			Num:         q.num,
 			Name:        q.name,
@@ -343,7 +319,6 @@ func (t *Topic) exit() {
 
 	var deadQueues []QueueMeta
 	for k, q := range t.deadQueues {
-		q.exit()
 		deadQueues = append(deadQueues, QueueMeta{
 			Num:         q.num,
 			Name:        q.name,
@@ -366,11 +341,39 @@ func (t *Topic) exit() {
 	data, err := json.Marshal(meta)
 	if err != nil {
 		t.logger.Error(fmt.Sprintf("write %s.meta failed, %v", t.name, err))
+		return err
 	}
 
 	_, err = fd.Write(data)
 	if err != nil {
 		t.logger.Error(fmt.Sprintf("write %s.meta failed, %v", t.name, err))
+		return err
+	}
+	return nil
+}
+
+// 退出topic
+func (t *Topic) exit() {
+	defer t.logger.Info(fmt.Sprintf("topic.%s has exit.", t.name))
+
+	t.closed = true
+	close(t.exitChan)
+	t.wg.Wait()
+
+	err := t.Serialize()
+	if err != nil {
+		t.logger.Error("%v", err)
+	}
+	t.queueMux.Lock()
+	defer t.queueMux.Unlock()
+
+	//var queues []QueueMeta
+	for _, q := range t.queues {
+		q.exit()
+	}
+
+	for _, q := range t.deadQueues {
+		q.exit()
 	}
 }
 
@@ -456,8 +459,11 @@ func (t *Topic) set(configure *topicConfigure) error {
 	if configure.msgRetry > 0 && configure.msgRetry < t.msgRetry {
 		t.msgRetry = configure.msgRetry
 	}
-
-	return nil
+	err := t.Serialize()
+	if err != nil {
+		t.logger.Error("%v", err)
+	}
+	return err
 }
 
 // 声明队列，绑定key必须是唯一值
@@ -473,7 +479,7 @@ func (t *Topic) declareQueue(bindKey string) error {
 
 	queueName := fmt.Sprintf("%s_%s", t.name, bindKey)
 	t.queues[bindKey] = NewQueue(queueName, bindKey, t)
-	return nil
+	return t.Serialize()
 }
 
 // 根据路由键获取队列，支持全匹配和模糊匹配两种方式
@@ -488,6 +494,10 @@ func (t *Topic) getQueuesByRouteKey(routeKey string) []*queue {
 		} else {
 			queueName := t.generateQueueName(DEFAULT_KEY)
 			t.queues[DEFAULT_KEY] = NewQueue(queueName, DEFAULT_KEY, t)
+			err := t.Serialize()
+			if err != nil {
+				t.logger.Error("%v", err)
+			}
 			return []*queue{t.queues[DEFAULT_KEY]}
 		}
 	}
@@ -538,27 +548,18 @@ func (t *Topic) getDeadQueueByBindKey(bindKey string, createNotExist bool) *queu
 
 	if createNotExist {
 		queueName := t.generateQueueName(fmt.Sprintf("%s_%s", bindKey, DEAD_QUEUE_FLAG))
+		t.deadQueueMux.Lock()
+		defer t.deadQueueMux.Unlock()
 		t.deadQueues[bindKey] = NewQueue(queueName, bindKey, t)
+		err := t.Serialize()
+		if err != nil {
+			t.logger.Error("%v", err)
+		}
 		return t.deadQueues[bindKey]
 	}
 
 	return nil
 }
-
-// 获取bucket堆积数量（延迟消息数量）
-//func (t *Topic) getBucketNum() int {
-//	var num int
-//	err := t.dispatcher.db.View(func(tx *bolt.Tx) error {
-//		bucket := tx.Bucket([]byte(t.name))
-//		num = bucket.Stats().KeyN
-//		return nil
-//	})
-//	if err != nil {
-//		t.logger.Error("%v",err)
-//	}
-//
-//	return num
-//}
 
 func (t *Topic) generateQueueName(bindKey string) string {
 	return fmt.Sprintf("%s_%s", t.name, bindKey)
