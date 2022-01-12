@@ -293,8 +293,6 @@ func (t *Topic) init() {
 }
 
 func (t *Topic) Serialize() error {
-	t.Lock()
-	defer t.Unlock()
 	t.logger.Info(fmt.Sprintf("writing topic.%s metadata.", t.name))
 	fd, err := os.OpenFile(fmt.Sprintf("%s/%s.meta", t.cfg.DataSavePath, t.name), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
@@ -359,8 +357,9 @@ func (t *Topic) exit() {
 	t.closed = true
 	close(t.exitChan)
 	t.wg.Wait()
-
+	t.Lock()
 	err := t.Serialize()
+	t.Unlock()
 	if err != nil {
 		t.logger.Error("%v", err)
 	}
@@ -479,7 +478,10 @@ func (t *Topic) declareQueue(bindKey string) error {
 
 	queueName := fmt.Sprintf("%s_%s", t.name, bindKey)
 	t.queues[bindKey] = NewQueue(queueName, bindKey, t)
-	return t.Serialize()
+	t.Lock()
+	err := t.Serialize()
+	t.Unlock()
+	return err
 }
 
 // 根据路由键获取队列，支持全匹配和模糊匹配两种方式
@@ -494,7 +496,9 @@ func (t *Topic) getQueuesByRouteKey(routeKey string) []*queue {
 		} else {
 			queueName := t.generateQueueName(DEFAULT_KEY)
 			t.queues[DEFAULT_KEY] = NewQueue(queueName, DEFAULT_KEY, t)
+			t.Lock()
 			err := t.Serialize()
+			t.Unlock()
 			if err != nil {
 				t.logger.Error("%v", err)
 			}
@@ -551,7 +555,9 @@ func (t *Topic) getDeadQueueByBindKey(bindKey string, createNotExist bool) *queu
 		t.deadQueueMux.Lock()
 		defer t.deadQueueMux.Unlock()
 		t.deadQueues[bindKey] = NewQueue(queueName, bindKey, t)
+		t.Lock()
 		err := t.Serialize()
+		t.Unlock()
 		if err != nil {
 			t.logger.Error("%v", err)
 		}
