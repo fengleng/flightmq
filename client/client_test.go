@@ -27,14 +27,14 @@ func TestClient_Declare(t *testing.T) {
 
 func TestClient_Push(t *testing.T) {
 	c := NewClient("127.0.0.1:9503", 1)
-	bytes, err := c.Push(MsgPkg{Topic: "test1", Delay: 0, RouteKey: "queue1", Body: "hello20"})
+	bytes, err := c.Push(MsgPkg{Topic: "test1", Delay: 0, RouteKey: "queue1", Body: "retry2"})
 	t.Log(err)
 	t.Log(string(bytes))
 }
 
 func TestClientSet(t *testing.T) {
 	c := NewClient("127.0.0.1:9503", 1)
-	bytes, err := c.Set("test1", 0, 2, 10, 10)
+	bytes, err := c.Set("test1", 0, 2, 2, 10)
 	t.Log(err)
 	t.Log(string(bytes))
 }

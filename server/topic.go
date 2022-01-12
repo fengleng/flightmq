@@ -255,17 +255,14 @@ func (t *Topic) init() {
 	t.pushNum = meta.PushNum
 	t.deadNum = meta.DeadNum
 	t.isAutoAck = meta.IsAutoAck
+	t.msgTTR = meta.MsgTTR
+	t.msgRetry = meta.MsgRetry
 
 	t.queueMux.Lock()
 	defer t.queueMux.Unlock()
 
 	// restore queue meta data
 	for _, q := range meta.Queues {
-		// skip empty queue
-		//if q.Num == 0 {
-		//	continue
-		//}
-
 		queue := NewQueue(q.Name, q.BindKey, t)
 		queue.woffset = q.WriteOffset
 		queue.roffset = q.ReadOffset
@@ -279,11 +276,6 @@ func (t *Topic) init() {
 
 	// restore dead queue meta data
 	for _, q := range meta.DeadQueues {
-		// skip empty queue
-		//if q.Num == 0 {
-		//	continue
-		//}
-
 		queue := NewQueue(q.Name, q.BindKey, t)
 		queue.woffset = q.WriteOffset
 		queue.roffset = q.ReadOffset
@@ -456,12 +448,12 @@ func (t *Topic) set(configure *topicConfigure) error {
 	}
 
 	// ttr
-	if configure.msgTTR > 0 && configure.msgTTR < t.msgTTR {
+	if configure.msgTTR > 0 {
 		t.msgTTR = configure.msgTTR
 	}
 
 	// retry
-	if configure.msgRetry > 0 && configure.msgRetry < t.msgRetry {
+	if configure.msgRetry > 0 {
 		t.msgRetry = configure.msgRetry
 	}
 	err := t.Serialize()
