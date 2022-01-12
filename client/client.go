@@ -528,20 +528,20 @@ func Example_Loop_Consume(c *Client, topic, bindKey string) {
 }
 
 // 批量生产消息
-func Example_MProduce(c *Client, topic string, num int, bindKey string) {
-	total := num
-	var msgs []MMsgPkg
-	for i := 0; i < total; i++ {
-		msgs = append(msgs, MMsgPkg{"golang_" + strconv.Itoa(i), 0})
-	}
-	if err := c.Mpush(topic, msgs, bindKey); err != nil {
-		log.Fatalln(err)
-	}
-
-	// receive response
-	rtype, data := c.Receive()
-	log.Println(fmt.Sprintf("rtype:%v, result:%v", rtype, string(data)))
-}
+//func Example_MProduce(c *Client, topic string, num int, bindKey string) {
+//	total := num
+//	var msgs []MMsgPkg
+//	for i := 0; i < total; i++ {
+//		msgs = append(msgs, MMsgPkg{"golang_" + strconv.Itoa(i), 0})
+//	}
+//	if err := c.Mpush(topic, msgs, bindKey); err != nil {
+//		log.Fatalln(err)
+//	}
+//
+//	// receive response
+//	rtype, data := c.Receive()
+//	log.Println(fmt.Sprintf("rtype:%v, result:%v", rtype, string(data)))
+//}
 
 // 订阅消息
 func Example_Subscribe(c *Client, channel string) {

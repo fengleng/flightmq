@@ -95,7 +95,7 @@ func (x *XLog) reopen() {
 	}
 	x.curHour = time.Now().Hour()
 	x.curHourTime = time.Now().Format("2006010203")
-	fName := fmt.Sprintf("%s%s%s%s", x.dir, x.sep, x.fileName, x.curHourTime)
+	fName := fmt.Sprintf("%s%s%s%s.log", x.dir, x.sep, x.fileName, x.curHourTime)
 	file, err := os.OpenFile(fName, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0666)
 	if err != nil {
 		log2.Println(err)

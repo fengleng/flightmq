@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/json"
+	"strconv"
 	"testing"
 )
 
@@ -33,6 +34,18 @@ func TestClient_Push(t *testing.T) {
 	bytes, err := c.Push(MsgPkg{Topic: "test1", Delay: 0, RouteKey: "queue1", Body: "TestClientPopAndAck"})
 	t.Log(err)
 	t.Log(string(bytes))
+}
+
+func TestClientMMPub(t *testing.T) {
+	total := 100
+	var msgList []MMsgPkg
+	for i := 0; i < total; i++ {
+		msgList = append(msgList, MMsgPkg{"golang_" + strconv.Itoa(i*i), 0})
+	}
+	c := NewClient("127.0.0.1:9503", 1)
+	msgIds, err := c.Mpush("test1", msgList, "queue1")
+	t.Log(err)
+	t.Log(msgIds)
 }
 
 func TestClientSet(t *testing.T) {
